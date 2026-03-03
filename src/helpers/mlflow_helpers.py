@@ -3,8 +3,8 @@ import logging
 import mlflow
 from omegaconf import DictConfig
 
+from src.model.abstract.abstract_skl_predictor_model import SKLPredictorModel
 from src.helpers.git_helpers import get_repo_name
-from src.model.abstract_components import SKLPredictorModel
 from src.model.composite_model import CompositeModel
 
 

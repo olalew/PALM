@@ -8,7 +8,7 @@ from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
 from skops.io import dump as sk_dump
 from skops.io import load as sk_load
 
-from src.model.abstract_components import run_mode
+from src.model.common import run_mode
 
 
 class PassThroughScaler:

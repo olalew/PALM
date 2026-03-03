@@ -12,8 +12,7 @@ from sklearn.preprocessing import MinMaxScaler, OneHotEncoder, RobustScaler
 from skops.io import dump as sk_dump
 from skops.io import load as sk_load
 
-from src.model.abstract_components import run_mode
-
+from src.model.common import run_mode
 
 logger = logging.getLogger(__name__)
 
@@ -28,14 +27,16 @@ All classes have a get_data method to facilitate usage
 
 
 class RadialBasisFunctionGaussian:
-    """Class for applying a gaussian radial basis function to real-valued data"""
+    """
+    Class for applying a gaussian radial basis function to real-valued data
+    """
 
     def __init__(
-        self,
-        cfg: DictConfig,
-        name: str,
-        min_value: float = None,
-        max_value: float = None,
+            self,
+            cfg: DictConfig,
+            name: str,
+            min_value: float = None,
+            max_value: float = None,
     ):
         """
         Initializes a new instance of the RadialBasisFunctionGaussian class.
@@ -178,12 +179,12 @@ class CategoricalData:
     """Class for storing categorical data by one-hot encoding"""
 
     def __init__(
-        self,
-        cfg: DictConfig,
-        data: list[str],
-        name: str,
-        apply_dimred: bool = False,
-        data_train_idx: list[int] = None,
+            self,
+            cfg: DictConfig,
+            data: list[str],
+            name: str,
+            apply_dimred: bool = False,
+            data_train_idx: list[int] = None,
     ):
         """
         Initializes a new instance of the CategoricalData class.
@@ -281,13 +282,13 @@ class RealData:
     """Class for storing real-valued data"""
 
     def __init__(  # noqa: C901, PLR0912, PLR0913 too complex, too many arguments, too many branches (ifelses)
-        self,
-        cfg: DictConfig,
-        data: np.array,
-        name: str,
-        standardize: str = None,
-        apply_dimred: bool = None,
-        data_train_idx: list[int] = None,
+            self,
+            cfg: DictConfig,
+            data: np.array,
+            name: str,
+            standardize: str = None,
+            apply_dimred: bool = None,
+            data_train_idx: list[int] = None,
     ):
         """
         Initializes a new instance of the class.
@@ -549,7 +550,7 @@ class CSVDataLoader:
         self._load_sample_weights()
 
     def _define_additional_data_columns(  # noqa: C901, PLR0912 too complex, too many branches
-        self, add_data_columns, data_columns_standard, data_columns_dimred
+            self, add_data_columns, data_columns_standard, data_columns_dimred
     ):
         """
         Define additional data columns in the dataframe
@@ -652,8 +653,8 @@ class CSVDataLoader:
         """
 
         if (
-            self.cfg.dataset.use_predefined_split
-            and self.cfg.dataset.data_split_column not in self.df.columns
+                self.cfg.dataset.use_predefined_split
+                and self.cfg.dataset.data_split_column not in self.df.columns
         ):
             raise ValueError(
                 f"Pre-defined split is requested, but there is no '{self.cfg.dataset.data_split_column}' column in the dataframe"

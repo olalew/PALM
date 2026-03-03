@@ -5,7 +5,6 @@ import mlflow
 import torch
 from torch import nn
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -13,12 +12,12 @@ class LSTMModule(L.LightningModule):
     """Fake AggreProt roughly developed from https://www.biorxiv.org/content/10.1101/2024.03.06.583680v1, adapted by EHEC"""
 
     def __init__(
-        self,
-        embeddings_dim: int,
-        output_dim: int = 1,
-        dropout: float = 0.25,
-        optimizer_type: str = "sgd",
-        learning_rate: float = 2.0e-4,
+            self,
+            embeddings_dim: int,
+            output_dim: int = 1,
+            dropout: float = 0.25,
+            optimizer_type: str = "sgd",
+            learning_rate: float = 2.0e-4,
     ):
         """
         Initializes a new instance of the LSTMModule class.
@@ -55,8 +54,21 @@ class LSTMModule(L.LightningModule):
         )
 
         self.linear1 = nn.Linear(embeddings_dim, 64 * 6)
-        self.LSTM1 = nn.LSTM(64 * 6, 64, bidirectional=True, batch_first=True)
-        self.LSTM2 = nn.LSTM(64 * 2, 96, bidirectional=True, batch_first=True)
+
+        # We run bidirectional, therefore for one direction the final hidden state is [batch, seq_length, 64]
+        # Concatenating both results gives us [batch, seq_length, 128]
+        self.LSTM1 = nn.LSTM(
+            input_size=64 * 6,
+            hidden_size=64,
+            bidirectional=True,
+            batch_first=True
+        )
+        self.LSTM2 = nn.LSTM(
+            input_size=64 * 2,
+            hidden_size=96,
+            bidirectional=True,
+            batch_first=True
+        )
 
         # Configure training
         self.optimizer_type = optimizer_type
@@ -73,7 +85,9 @@ class LSTMModule(L.LightningModule):
         """
 
         o = self.linear1(x)
+        # outputs [batch, seq_length, 2 * 64 = 128]
         o = self.LSTM1(o)[0]
+        # outputs [batch, seq_length, 2 * 96 = 192]
         o = self.LSTM2(o)[0]
         o = torch.flatten(o, start_dim=1, end_dim=-1)
         o = self.layers(o)  # [batchsize, output_dim]
@@ -105,7 +119,7 @@ class LSTMModule(L.LightningModule):
             raise ValueError(f"optimizer not defined: {self.optimizer_type}")
 
 
-def LSTM_custom_collate(batch: list[torch.tensor]):  # noqa: N802
+def LSTM_custom_collate(batch: list[torch.Tensor]):  # noqa: N802
     """
     Takes list of tuples with embeddings and converts them to tensors
     Args:

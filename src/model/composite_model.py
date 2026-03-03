@@ -1,127 +1,28 @@
 import logging
-from dataclasses import dataclass
+
 from pathlib import Path
+from typing import Any
 
 import mlflow
 import numpy as np
 import pandas as pd
 from omegaconf import DictConfig, OmegaConf, open_dict
 
+from src.model.abstract.abstract_dimention_reduction_model import DimRedModel
+from src.model.abstract.abstract_embedder_model import EmbedderModel
+from src.model.abstract.abstract_predictor_model import PredictorModel
+from src.model.common import component_type
+from src.model.data_classes.prediction import Prediction
 from src.helpers.dataset import CSVDataLoader
 from src.helpers.io import create_folder_if_not_exists
-from src.model.abstract_components import (
-    DimRedModel,
-    EmbedderModel,
-    PredictorModel,
-    component_type,
-)
 from src.model.scalers import ScalerWrap
-
-
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class Prediction:
-    """Dataclass for organizing the output and intermediate values from the model"""
-
-    sequences: np.array
-    sequence_embeddings: np.array
-    additional_features_untransformed: pd.DataFrame
-    features: np.array
-    features_concat_dimred_concat: np.array
-    predictions: np.ma.masked_array
-    predictions_scaled: np.array  # TODO: convert to masked array?
-    data_split: str
-    labels: np.array = None  # Labels only available during training
-    group_names: list[str] = None
-    predictions_probability: np.ma.masked_array = None  # Not all methods provide a probability
-    residue_level_prediction: bool = False
-
-    def get_dataframe(self):
-        if self.sequences.shape[0] == 0:
-            return pd.DataFrame()
-        # create the sequence-level table
-        df = pd.DataFrame(
-            {
-                "sequence": self.sequences,
-                "data_split": self.data_split,
-                "group": self.group_names if self.group_names is not None else "",
-            }
-        )
-        df = (
-            pd.concat(
-                [self.additional_features_untransformed.reset_index(drop=True), df],
-                axis=1,
-            )
-            if self.additional_features_untransformed is not None
-            else df
-        )
-
-        # expand to residue-level table, if applicable
-        if self.residue_level_prediction:
-            df["sequence_length_aa"] = df["sequence"].apply(len)
-            explode_length = df["sequence_length_aa"].sum()
-            df["res_aa"] = df["sequence"].apply(list)
-            df["res_aa_idx"] = df["sequence"].apply(lambda x: range(len(x)))
-            df["res_value_bool"] = (
-                [[int(y) for y in list(x)] for x in self.labels]
-                if self.labels is not None
-                else None
-            )
-            df = df.explode(["res_aa", "res_aa_idx", "res_value_bool"]).reset_index(
-                names="sequence_idx"
-            )
-            if len(df) != explode_length:
-                raise ValueError(
-                    f"Mismatched number of rows in residue table. Expected {explode_length} and found {len(df)}"
-                )
-
-            # add the labels and predictions
-            df["y"] = np.concatenate(
-                [np.array([float(y) for y in list(x)], dtype=float) for x in self.labels]
-            )
-            df["y_pred"] = self.predictions.compressed()
-            df["y_pred_prob"] = self.predictions_probability.compressed()
-
-        else:
-            # all the labels and predictions are already flattened
-            df["y"] = self.labels
-            df["y_pred"] = self.predictions
-            df["y_pred_prob"] = (
-                self.predictions_probability if self.predictions_probability is not None else np.nan
-            )
-
-            if self.additional_features_untransformed is not None:
-                df = pd.concat(
-                    [self.additional_features_untransformed.reset_index(drop=True), df],
-                    axis=1,
-                )
-
-        return df
-
-    def describe_data(self):
-        for name, val in vars(self).items():
-            if not name.startswith("__") and val is not None:
-                if val is not None and type(val) not in [str, bool]:
-                    shape = getattr(val, "shape", None)
-                    shape = shape if shape else len(val)
-                    print(f"{name}: {shape}")
-                else:
-                    print(f"{name}: {val}")
-
-
 class CompositeModel:
-    """Modular class for generating embedding features with large self-supervised models and making predictions with small supervised models trained on small datasets"""
-
-    def __init__(self, cfg: DictConfig, inference_only: bool = False) -> None:
-        """
-        Initializes a CompositeModel object.
-
-        Args:
-            cfg (DictConfig): The configuration for the model.
-
+    """
+        Modular class for generating embedding features with large self-supervised models and making predictions with small supervised models trained on small datasets
         Attributes:
             cfg (DictConfig): The configuration for the model.
             embed_hdf5 (h5py.File): The HDF5 file for the embeddings.
@@ -139,9 +40,16 @@ class CompositeModel:
             getModelName() -> str: Creates a name for the model that captures all of the defining aspects.
             trainingComplete() -> bool: Checks if the training is complete.
             storeModel() -> None: Stores the model.
+    """
+
+    def __init__(self, cfg: DictConfig, inference_only: bool = False) -> None:
+        """
+        Initializes a CompositeModel object.
+        Args:
+            cfg (DictConfig): The configuration for the model.
         """
         self.cfg = cfg
-        self.hparamsresults_df = None
+        self.h_params_results_df = None
 
         self.embed_hdf5 = None
 
@@ -149,7 +57,7 @@ class CompositeModel:
         self.emb_class = EmbedderModel.subclass_registry[cfg[component_type.embedder].class_name]
         self.embedder = None  # only load the embedder class if necessary
         dimred_class = DimRedModel.subclass_registry[cfg[component_type.dimred].class_name]
-        self.dimensionreducer = dimred_class(self.cfg)
+        self.dimension_reducer = dimred_class(self.cfg)
         pred_class = PredictorModel.subclass_registry[cfg[component_type.predictor].class_name]
         self.predictor = pred_class(self.cfg)
 
@@ -174,13 +82,11 @@ class CompositeModel:
         else:
             raise ValueError("The embedder is already loaded")
 
-    def embed_sequences(self, sequences: list) -> np.array:
+    def embed_sequences(self, sequences: list) -> np.ndarray:
         """
         Method for converting sequences into embeddings.
-
         Args:
             sequences (list): The list of sequences to be embedded.
-
         Returns:
             np.array: The embeddings of the sequences.
         """
@@ -198,38 +104,30 @@ class CompositeModel:
 
         return embeddings
 
-    def reduce_dimensionality(
-        self,
-        embeddings: np.array,
-    ) -> np.array:
+    def reduce_dimensionality(self, embeddings: np.ndarray) -> np.ndarray:
         """
         Method for reducing dimensionality of vector embeddings.
-
         Args:
             embeddings (np.array): The vector embeddings to be dimensionality reduced.
-
         Returns:
             np.array: The dimensionality reduced vector embeddings.
         """
-        embeddings_compressed = self.dimensionreducer.forward(embeddings.copy())
+        embeddings_compressed = self.dimension_reducer.forward(embeddings.copy())
         return embeddings_compressed
 
-    def predict_properties(self, embeddings: np.array) -> np.array:
+    def predict_properties(self, embeddings: np.ndarray) -> tuple[Any, Any]:
         """
         Method for converting dimensionality reduced vector embeddings into property predictions.
-
         Args:
             embeddings (np.array): The dimensionality reduced vector embeddings.
-
             np.array: The property predictions.
         """
         predictions, predictions_probability = self.predictor.forward(embeddings)
         return predictions, predictions_probability
 
-    def forward(self, dataloader: CSVDataLoader = None, split: str = "test") -> np.array:
+    def forward(self, dataloader: CSVDataLoader = None, split: str = "test") -> Prediction:
         """
-        All of the processing methods: 1) embedding, 2) dimensionality reduction, and 3) prediction chained together.
-
+        All the processing methods: 1) embedding, 2) dimensionality reduction, and 3) prediction chained together.
         Args:
             dataloader (CSVDataLoader): The object storing the data
             split (str): The name of the selected split
@@ -242,7 +140,7 @@ class CompositeModel:
         # Get the data
         sequences = dataloader.get_sequence_data()[split]
         features = dataloader.get_additional_data(apply_dimred=True)[split]  # n x f
-        features_nodimred = dataloader.get_additional_data(apply_dimred=False)[split]  # n x g
+        features_no_dimension_reduction = dataloader.get_additional_data(apply_dimred=False)[split]  # n x g
         labels = dataloader.get_training_labels()[split]
 
         group_names = dataloader.get_group_names()
@@ -250,9 +148,6 @@ class CompositeModel:
 
         # Embed the sequences
         sequences_embedded = self.embed_sequences(sequences)  # n x h
-
-        predictions_scaled = None
-        predictions_probability = None
         if isinstance(sequences_embedded, np.ndarray):
             logger.info("N x H embeddings (mean-pooled or length-invariant featurizer)")
 
@@ -269,8 +164,8 @@ class CompositeModel:
 
             # Get the additional data values were not included in dimensionality reduction and concat
             features_concat_dimred_concat = (
-                np.concatenate([features_concat_dimred, features_nodimred], axis=-1)
-                if features_nodimred is not None
+                np.concatenate([features_concat_dimred, features_no_dimension_reduction], axis=-1)
+                if features_no_dimension_reduction is not None
                 else features_concat_dimred
             )  # n x (h_1 + g)
 
@@ -300,24 +195,25 @@ class CompositeModel:
             split,
             labels,
             group_names,
-            predictions_probability,  
+            predictions_probability,
             residue_level_prediction=self.cfg.predictor.residue_prediction_mode,
         )
         return prediction
 
-    def train_predictor_model(self) -> None:  # noqa: PLR0912, PLR0915
+    def train_predictor_model(self) -> tuple[Prediction, Prediction]:  # noqa: PLR0912, PLR0915
         """
         Trains the predictor model.
-
         Returns:
             tuple[Prediction]: Dataclasses containing output and intermediate values from the model train/validation splits.
         """
 
         # Get the data
         sequences = self.dataloader.get_sequence_data()
-        features = self.dataloader.get_additional_data(apply_dimred=True)  # n x f
+        # n x f
+        features = self.dataloader.get_additional_data(apply_dimred=True)
         features_raw = self.dataloader.get_additional_data_untransformed()
-        features_nodimred = self.dataloader.get_additional_data(apply_dimred=False)  # n x g
+        # n x g
+        features_no_dimension_reduction = self.dataloader.get_additional_data(apply_dimred=False)
         labels = self.dataloader.get_training_labels()
         group_names = self.dataloader.get_group_names()
         sample_weights = self.dataloader.get_sample_weights()
@@ -329,42 +225,49 @@ class CompositeModel:
             logger.info("N x H embeddings (mean-pooled or length-invariant featurizer)")
 
             # Get the additional features to be included in dimensionality reduction and concat
+            # n x (h + f)
             features_concat_train = (
                 np.concatenate([sequences_embedded_train, features["train"]], axis=-1)
                 if features["train"] is not None
                 else sequences_embedded_train
-            )  # n x (h + f)
+            )
 
             # Perform PCA with train data and reduce feature dimension
             # The new hidden dimension size is less than or equal to the previous one: h_1 <= (h + f)
-            self.dimensionreducer.fit_data(features_concat_train)
+            # n x h_1
+            self.dimension_reducer.fit_data(features_concat_train)
             features_concat_dimred_train = self.reduce_dimensionality(
                 features_concat_train
-            )  # n x h_1
+            )
 
             # Get the additional data values were not included in dimensionality reduction and concat
+            # n x (h_1 + g)
             features_concat_dimred_concat_train = (
-                np.concatenate([features_concat_dimred_train, features_nodimred["train"]], axis=-1)
-                if features_nodimred["train"] is not None
+                np.concatenate([features_concat_dimred_train, features_no_dimension_reduction["train"]], axis=-1)
+                if features_no_dimension_reduction["train"] is not None
                 else features_concat_dimred_train
-            )  # n x (h_1 + g)
+            )
 
             # If there is a validation split, process that too
             if len(sequences["val"]) > 0:
-                sequences_embedded_val = self.embed_sequences(sequences["val"])  # n x h
+                # n x h
+                sequences_embedded_val = self.embed_sequences(sequences["val"])
+                # n x (h + f)
                 features_concat_val = (
                     np.concatenate([sequences_embedded_val, features["val"]], axis=-1)
                     if features["val"] is not None
                     else sequences_embedded_val
-                )  # n x (h + f)
+                )
+                # n x h_1
                 features_concat_dimred_val = self.reduce_dimensionality(
                     features_concat_val
-                )  # n x h_1
+                )
+                # n x (h_1 + g)
                 features_concat_dimred_concat_val = (
-                    np.concatenate([features_concat_dimred_val, features_nodimred["val"]], axis=-1)
-                    if features_nodimred["val"] is not None
+                    np.concatenate([features_concat_dimred_val, features_no_dimension_reduction["val"]], axis=-1)
+                    if features_no_dimension_reduction["val"] is not None
                     else features_concat_dimred_val
-                )  # n x (h_1 + g)
+                )
             else:
                 (
                     sequences_embedded_val,
@@ -387,17 +290,6 @@ class CompositeModel:
                 labels_scaled["val"],
                 sample_weights,
             )
-            predictions_train_scaled, predictions_probability_train = self.predictor.forward(
-                features_concat_dimred_concat_train
-            )
-            if features_concat_dimred_concat_val is not None:
-                predictions_val_scaled, predictions_probability_val = self.predictor.forward(
-                    features_concat_dimred_concat_val
-                )
-            else:
-                predictions_val_scaled, predictions_probability_val = None, None
-            train_intervals = None
-            val_intervals = None
 
             # Predict output with trained model
             predictions_train_scaled, predictions_probability_train = self.predictor.forward(
@@ -458,8 +350,6 @@ class CompositeModel:
                 if sequences_embedded_val is not None
                 else (None, None)
             )
-            train_intervals = None
-            val_intervals = None
 
         # rescaled predictions:
         predictions_train = self.target_scaler.restore_values(predictions_train_scaled)
@@ -468,10 +358,11 @@ class CompositeModel:
         # Update configs after fitting
         self.predictor.update_config_hparams()
         self.predictor.update_predictor_name()
+
         logger.info(f"This is the updated predictor name: {self.cfg.predictor.model_name}")
         self.cfg.general.composite_model_name = self.get_model_name()
         logger.info(f"Best model is: {self.predictor.get_hparams_string()}")
-        # self.hparamsresults_df = pd.DataFrame(model_selector.cv_results_)
+
         self.predictor.trained = True
         logger.info("Moving to test mode")
         self.cfg.general.run_mode = "test"
@@ -511,7 +402,6 @@ class CompositeModel:
     def get_model_config(self) -> DictConfig:
         """
         Returns the configuration of the model.
-
         Returns:
             DictConfig: The configuration of the model.
         """
@@ -519,8 +409,7 @@ class CompositeModel:
 
     def get_model_name(self) -> str:
         """
-        Creates a name for the model that captures all of the defining aspects.
-
+        Creates a name for the model that captures all the defining aspects.
         Returns:
             str: The name of the model.
         """
@@ -542,7 +431,6 @@ class CompositeModel:
     def training_complete(self) -> bool:
         """
         Checks if the training is complete.
-
         Returns:
             bool: True if training is complete, False otherwise.
         """
@@ -555,13 +443,12 @@ class CompositeModel:
             return False
 
     def store_model(
-        self,
-        run_name: str,
+            self,
+            run_name: str,
     ) -> None:
         """
         Stores the model.
         """
-
         self.cfg.general.composite_model_name = self.get_model_name()
         logger.info(f"Saving model: {self.cfg.general.composite_model_name}")
 
@@ -596,7 +483,7 @@ class CompositeModel:
 
         # Store the dimensionality reducer
         if self.cfg.dimred.transform_name:
-            path = self.dimensionreducer.save_model(dir_path)
+            path = self.dimension_reducer.save_model(dir_path)
             mlflow.log_artifact(path)
 
         # store target scaler.
@@ -622,6 +509,6 @@ class CompositeModel:
 
         # Save the results of the hyperparameter scan
         hparam_results_csv_path = Path(dir_path, self.cfg.general.composite_model_name + ".csv")
-        if self.predictor.hparamsresults_df is not None:
-            self.predictor.hparamsresults_df.to_csv(hparam_results_csv_path)
+        if self.predictor.h_params_results_df is not None:
+            self.predictor.h_params_results_df.to_csv(hparam_results_csv_path)
             mlflow.log_artifact(str(hparam_results_csv_path))
