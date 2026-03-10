@@ -95,7 +95,7 @@ class LightAttention(TorchPredictorModel):
             embeddings_dim=embedding_dim,
             output_dim=self.cfg.predictor.hparams.output_dim,
             kernel_size=self.cfg.predictor.hparams.kernel_size,
-            dropout=self.cfg.predictor.hparams.dropout,
+            dropout=self.cfg.predictor.hparams.conv_dropout,
             conv_dropout=self.cfg.predictor.hparams.conv_dropout,
             optimizer_type=self.cfg.predictor.hparams.optimizer_type,
             learning_rate=self.cfg.predictor.hparams.learning_rate,

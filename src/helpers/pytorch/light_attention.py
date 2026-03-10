@@ -86,7 +86,7 @@ class LightAttentionModule(L.LightningModule):
         )
 
         self.softmax = nn.Softmax(dim=-1)
-        self.dropout = nn.Dropout(conv_dropout)
+        self.conv_dropout = nn.Dropout(conv_dropout)
         self.sigmoid = nn.Sigmoid()
 
         # if self.residue_prediction_mode else 2
@@ -159,7 +159,7 @@ class LightAttentionModule(L.LightningModule):
         # in [batch_size, embeddings_dim, sequence_length]
         self.o = self.feature_convolution(x)
         # in [batch_size, conv1d_output_dim, sequence_length]
-        self.o = self.dropout(self.o)
+        self.o = self.conv_dropout(self.o)
 
         # Attention path
         # in [batch_size, embeddings_dim, sequence_length]

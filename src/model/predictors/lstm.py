@@ -77,7 +77,7 @@ class LSTM(TorchPredictorModel):
         self.model = LSTMModule(
             embeddings_dim=embedding_dim,
             output_dim=1,
-            dropout=self.cfg.predictor.hparams.dropout,
+            dropout=self.cfg.predictor.hparams.conv_dropout,
             optimizer_type=self.cfg.predictor.hparams.optimizer_type,
             learning_rate=self.cfg.predictor.hparams.learning_rate,
         )
